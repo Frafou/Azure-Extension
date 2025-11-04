@@ -16,17 +16,18 @@
 <#
    .SYNOPSIS
       Reports on all out-of-date extensions on Azure Arc systems in a specified
-      Azure resource group, and optionally updates them.
+      Azure resource group, and optionally updates them. and if the Update switch is specified, updates them.
 
    .DESCRIPTION
       The script first uses the "az" command-line interface to download a list of all current Arc extensions.  This list is parsed and used by cmdlets from the Az.ConnectedMachine module to list, and optionally upgrade, all extensions with updates for all Azure Arc systems in a given Resource Group.
 
-    .PARAMETER CheckOnly
-      (Default) The script will only report on out-of-date extensions.
-
     .PARAMETER Update
       The script will attempt to update all out-of-date extensions on all
       Azure Arc systems in the specified Resource Group.
+
+    .PARAMETER ResourceGroup
+      The name of the Azure Resource Group containing the Azure Arc systems
+      to be assessed.
 
    .NOTES
         Pre-Requisites:
@@ -62,19 +63,14 @@
 #>
 
 
-[CmdletBinding(DefaultParameterSetName = 'CheckOnly')]
+[CmdletBinding()]
 param (
-    [Parameter(ParameterSetName = 'CheckOnly')]
-    [switch]$CheckOnly = $true,
 
-    [Parameter(ParameterSetName = 'Update')]
+    [parameter(ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true, HelpMessage = 'Message' , Mandatory = $false, Position = 0)]
+    [string]$ResourceGroup = 'ArcRG',
+    [parameter(ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true, HelpMessage = 'Message' , Mandatory = $false, Position = 0)]
     [switch]$Update
-
 )
-
-############# Modify these lines for your environment as appropriate #############
-$resourceGroup = 'ArcRG'
-
 
 function Update-Extension {
     param (
@@ -86,7 +82,7 @@ function Update-Extension {
     )
     $target = @{$extension = @{'targetVersion' = $version } }
     Write-Host 'Starting job to update' $extension 'on' $machine 'from' $oldVersion 'to' $newVersion
-    Update-AzConnectedExtension -ResourceGroupName $resourcegroup -MachineName $machine -ExtensionTarget $target -AsJob | Out-Null
+    Update-AzConnectedExtension -ResourceGroupName $ResourceGroup -MachineName $machine -ExtensionTarget $target -AsJob | Out-Null
     Start-Sleep -Seconds 5  # added delay to help ensure many out-of-date extensions can patch in a single run
 }
 
@@ -127,13 +123,14 @@ function Get-ArcMachineExtensions {
         $extName = $extension.publisher + '.' + $extension.InstanceViewType
 
         if ($extension.TypeHandlerVersion -ne $lookupTable.$extName) {
-            if ($PSCmdlet.ParameterSetName -eq 'Update') {
-
-                Update-Extension -resourcegroup $resourceGroup -machine $machine -extension $extName -oldVersion $extension.TypeHandlerVersion -newVersion $lookupTable.$extName
+            if ($Update) {
+                Write-Host 'Updating the extension.' -ForegroundColor Yellow
+                Update-Extension -resourcegroup $ResourceGroup -machine $machine -extension $extName -oldVersion $extension.TypeHandlerVersion -newVersion $lookupTable.$extName
             } else {
                 Write-Host $machine 'needs to update' $extname 'from' $extension.TypeHandlerVersion 'to' $lookupTable.$extName
             }
         } else {
+            write-versbose $machine $extName 'is up to date.'
         }
     }
 
@@ -161,6 +158,18 @@ if ($PSBoundParameters.Count -eq 0) {
 } else {
     Write-Host 'Unknown parameter entered, exiting...'
     exit
+}
+
+
+if($update){
+    Write-Host 'Running in -Update mode.' -ForegroundColor Yellow
+    Write-Host 'All out-of-date extensions will be updated, including those with Auto-Update enabled.'-ForegroundColor Yellow
+    Write-Host ''
+
+}else{
+    Write-Host 'Running in -CheckOnly reporting mode...' -ForegroundColor Green
+    Write-Host 'Use the -Update parameter to update Azure Arc extensions.' -ForegroundColor Yellow
+    Write-Host ''
 }
 
 # Create our lookup table for extension and version
