@@ -178,13 +178,13 @@ if ($update) {
 }
 
 
-<#
+
 # Create our lookup table for extension and version
 $lookupTable = @{}
 
 # Populate the table
 Update-LookupTable
-#>
+
 # Get Azure Arc machines in resource group
 $machines = Get-AzConnectedMachine -ResourceGroupName $resourceGroup | Where-Object { $_.ProvisioningState -eq 'Succeeded' -and $_.Status -eq 'Connected' }
 $machineCount = $machines.count
