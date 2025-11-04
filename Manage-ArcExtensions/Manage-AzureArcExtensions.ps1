@@ -130,7 +130,7 @@ function Get-ArcMachineExtensions {
                 Write-Host $machine 'needs to update' $extname 'from' $extension.TypeHandlerVersion 'to' $lookupTable.$extName
             }
         } else {
-            write-versbose $machine $extName 'is up to date.'
+            write-verbose $machine $extName 'is up to date.'
         }
     }
 
