@@ -44,19 +44,21 @@
         https://learn.microsoft.com/en-us/graph/tutorials/powershell?tabs=aad&tutorial-step=1
         2) Highly encouraged to use PowerShell 7.x or higher, and not built-in Windows PowerShell for massive speed improvements
 
-
         Name: Manage-ArcExtensions.ps1
         Author: Scott Brondel, sbrondel@microsoft.com
-        Version 1.0 / July 2, 2025
-        - Initial Release
+        Version History:
+         1.0  07/02/2025 Scott Brondel     - Initial Release
+         1.1  11/04/2025 Francois Fournier - Added Resource Group Parameter and more logging and fixed minor bugs
+         1.2  11/04/2025 Francois Fournier - Integrated logging function
 
    .EXAMPLE
       Manage-ArcExtensions.ps1
-      Manage-ArcExtensions.ps1 -CheckOnly
+      Manage-ArcExtensions.ps1 -ResourceGroup <ResourceGroupName>
       Manage-ArcExtensions.ps1 -Update
 
    .OUTPUTS
       A .csv file created in the same folder as this script, named for the contents of the $OutputFile variable.
+      .log file created in the same folder as this script, named for the ScriptName variable.
 
    .LINK
       https://github.com/sbrondel/scripts/Manage-AzureArcExtensions
@@ -78,6 +80,94 @@ param (
     [switch]$Update
 )
 
+<#
+.SYNOPSIS
+	Log and display message
+
+.DESCRIPTION
+	Display message on the screen  with appropriate level while Creating a log file for permanent storage
+
+.PARAMETER Message
+  String parameter for Message
+
+.PARAMETER Level
+  Specifies the level of the information message. Valid values are:
+	'INFO', 'WARNING', 'ERROR', 'DEBUG'
+
+.INPUTS
+	.none
+
+.OUTPUTS
+	Log: "$ScriptPath\$ScriptName-$LogDate.log"
+
+.Example
+		Write-Log -Message 'This is an informational message.' -Level 'INFO'
+		Write-Log -Message 'This is a warning message.' -Level 'WARNING'
+		Write-Log -Message 'This is an error message.' -Level 'ERROR'
+		Write-Log -Message 'This is a debug message.' -Level 'DEBUG'
+
+.Notes
+    Author: Francois Fournier
+    Created: 2025-01-01
+    Version: 1.0.0
+    Last Updated: 2025-01-01
+    License: MIT License
+
+    V1.0 Initial version
+
+.DISCLAIMER
+  This script is provided "as is" without warranty of any kind, either express or implied.
+  Use of this script is at your own risk. The author assumes no responsibility for any
+  damage or loss resulting from the use or misuse of this script.
+
+  You are free to modify and distribute this script, provided that this disclaimer remains
+  intact and visible in all copies and derivatives.
+
+  Always test scripts in a safe environment before deploying to production.
+
+.link
+
+ #>
+<#
+#Requires -Version <N>[.<n>]
+#Requires -Modules { <Module-Name> | <Hashtable> }
+#Requires -PSEdition <PSEdition-Name>
+#Requires -Modules PSLogging
+#>
+
+
+#=============================================================================
+# region Functions
+function Write-Log {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$Message,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('INFO', 'WARNING', 'ERROR', 'DEBUG')]
+        [string]$Level
+    )
+    $timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    $logEntry = "$timestamp [$level] $message"
+    Add-Content -Path $logFile -Value $logEntry
+    switch ($Level) {
+        'INFO' {
+            Write-Host "[INFO] $Message" -ForegroundColor Green
+        }
+        'WARNING' {
+            Write-Host "[WARNING] $Message" -ForegroundColor Yellow
+        }
+        'ERROR' {
+            Write-Host "[ERROR] $Message" -ForegroundColor Red
+        }
+        'DEBUG' {
+            Write-Host "[DEBUG] $Message" -ForegroundColor Cyan
+        }
+    }
+}
+
+#endregion Functions
+
 function Update-Extension {
     param (
         $resourceGroup,
@@ -87,13 +177,13 @@ function Update-Extension {
         $newVersion
     )
     $target = @{$extension = @{'targetVersion' = $version } }
-    Write-Host 'Starting job to update' $extension 'on' $machine 'from' $oldVersion 'to' $newVersion
+    Write-log 'Starting job to update' $extension 'on' $machine 'from' $oldVersion 'to' $newVersion
     Update-AzConnectedExtension -ResourceGroupName $ResourceGroup -MachineName $machine -ExtensionTarget $target -AsJob | Out-Null
     Start-Sleep -Seconds 5  # added delay to help ensure many out-of-date extensions can patch in a single run
 }
 
 <#
-PS C:\> $extensions = get-azconnectedmachineextension -ResourceGroupName ArcRG -MachineName ET ; foreach ($extension in $extensions) {$extName = $extension.publisher+"."+$extension.Name; $extPair = $extName+","+$extension.TypeHandlerVersion; write-host $extPair}
+PS C:\> $extensions = get-azconnectedmachineextension -ResourceGroupName ArcRG -MachineName ET ; foreach ($extension in $extensions) {$extName = $extension.publisher+"."+$extension.Name; $extPair = $extName+","+$extension.TypeHandlerVersion; Write-log $extPair}
 Microsoft.Azure.Security.Monitoring.AzureSecurityWindowsAgent,1.8.0.76
 Qualys.WindowsAgent.AzureSecurityCenter,1.0.0.20
 Microsoft.CPlat.Core.WindowsPatchExtension,1.5.68
@@ -102,7 +192,7 @@ Microsoft.Azure.AzureDefenderForServers.MDE.Windows,1.0.9.5
 Microsoft.SoftwareUpdateManagement.WindowsOsUpdateExtension,1.0.20.0 #>
 
 function Update-LookupTable {
-    Write-Host 'Getting list of latest extensions, this will take a minute or two...'
+    Write-log 'Getting list of latest extensions, this will take a minute or two...' -Level INFO
     $currentVersions = az vm extension image list --latest
     $currentVersions = $currentVersions | ConvertFrom-Json
     foreach ($extension in $currentVersions) {
@@ -118,7 +208,7 @@ function Get-ArcMachineExtensions {
         $resourceGroup,
         $machine
     )
-    Write-Host "Getting extensions for $machine in Resource Group $resourceGroup"
+    Write-log "Getting extensions for $machine in Resource Group $resourceGroup" -Level INFO
 
     # Get all extensions for this system not in the Creating or Updating state.  This means we will try to
     # update extensions that are currently in the Failed state.
@@ -128,19 +218,19 @@ function Get-ArcMachineExtensions {
         # Example:  Name of MicrosoftDefenderForSQL but Type/InstanceViewType is AdvancedThreatProtection.Windows
         $extname = $extension.publisher + '.' + $extension.name
 
-        if ($extension.version -ne $lookupTable.$extName) {
+        if ($extension.TypeHandlerVersion -ne $lookupTable.$extName) {
             if ($Update) {
-                Write-Host 'Updating the extension.' -ForegroundColor Yellow
+                Write-Log 'Updating the extension.' -Level WARNING
                 Update-Extension -resourcegroup $ResourceGroup -machine $machine -extension $extName -oldVersion $extension.TypeHandlerVersion -newVersion $lookupTable.$extName
             } else {
-                Write-Host $machine 'needs to update' $extname 'from' $extension.TypeHandlerVersion 'to' $lookupTable.$extName
+                Write-log $machine 'needs to update' $extname 'from' $extension.TypeHandlerVersion 'to' $lookupTable.$extName -Level Info
             }
         } else {
-            Write-Host $machine $extName 'is up to date.'
+            Write-log $machine $extName 'is up to date.' -Level INFO
         }
     }
 
-    Write-Host ''
+    Write-log ''
 }
 
 function Get-ActiveJobs {
@@ -148,33 +238,44 @@ function Get-ActiveJobs {
 }
 
 ################# Main Script Start ##########################
+
+#=============================================================================
+# region Variables
+$LogDate = Get-Date -Format yyyyMMdd-HHmmss
+$ScriptPath = Split-Path -Path $MyInvocation.MyCommand.Definition -Parent
+$ScriptName = Split-Path -Path $MyInvocation.MyCommand.Definition -Leaf
+$logPath = "$ScriptPath"
+$LogName = ($ScriptName).Replace('.ps1', '') + '-' + $LogDate + '.log'
+$LogFile = $logPath + '\' + "$LogName"
+
+#endregion Variables
 <#
 if ($PSBoundParameters.Count -eq 0) {
-    Write-Host 'No parameters were specified, operating in -CheckOnly reporting mode.'
-    Write-Host 'Use the -Update parameter to update Azure Arc extensions.'
-    Write-Host ''
+    Write-log 'No parameters were specified, operating in -CheckOnly reporting mode.' -Level INFO
+    Write-log 'Use the -Update parameter to update Azure Arc extensions.'-Level INFO
+    Write-log "`n" -Level INFO
 } elseif ($PSCmdlet.ParameterSetName -eq 'CheckOnly') {
-    Write-Host 'Running in -CheckOnly reporting mode...'
-    Write-Host ''
+    Write-log 'Running in -CheckOnly reporting mode...'-Level INFO
+    Write-log "`n" -Level INFO
 } elseif ($PSCmdlet.ParameterSetName -eq 'Update') {
-    Write-Host 'Running in -Update mode.'
-    Write-Host 'All out-of-date extensions will be updated, including those with Auto-Update enabled.'
-    Write-Host ''
+    Write-log 'Running in -Update mode.'-Level INFO
+    Write-log 'All out-of-date extensions will be updated, including those with Auto-Update enabled.'-Level INFO
+    Write-log "`n" -Level INFO
 } else {
-    Write-Host 'Unknown parameter entered, exiting...'
+    Write-log 'Unknown parameter entered, exiting...'-Level INFO
     exit
 }
 #>
 
 if ($update) {
-    Write-Host 'Running in -Update mode.' -ForegroundColor Yellow
-    Write-Host 'All out-of-date extensions will be updated, including those with Auto-Update enabled.'-ForegroundColor Yellow
-    Write-Host ''
+    Write-log 'Running in -Update mode.' -Level Warning
+    Write-log 'All out-of-date extensions will be updated, including those with Auto-Update enabled.' -Level Warning
+    Write-log '' -Level Warning
 
 } else {
-    Write-Host 'Running in -CheckOnly reporting mode...' -ForegroundColor Green
-    Write-Host 'Use the -Update parameter to update Azure Arc extensions.' -ForegroundColor Yellow
-    Write-Host ''
+    Write-log 'Running in -CheckOnly reporting mode...' -Level INFO
+    Write-log 'Use the -Update parameter to update Azure Arc extensions.' -Level Warning
+    Write-log "`n" -Level INFO
 }
 
 
@@ -190,8 +291,8 @@ $machines = Get-AzConnectedMachine -ResourceGroupName $resourceGroup | Where-Obj
 $machineCount = $machines.count
 
 # Begin main loop, with progress bar
-Write-Host 'Discovered' $machineCount "Azure Arc systems in Resource Group $resourceGroup"
-Write-Host ''
+Write-log 'Discovered' $machineCount "Azure Arc systems in Resource Group $resourceGroup" -Level INFO
+Write-log "`n" -Level INFO
 $currentMachine = 1
 
 foreach ($machine in $machines) {
@@ -213,13 +314,13 @@ $activeJobs = Get-ActiveJobs
 while ($activeJobs -gt 0) {
     $curTime = (Get-Date -Format 'hh:mm:ss tt')
     if ($activeJobs -gt 1) {
-        Write-Host -NoNewline "`r$curTime - $activeJobs update jobs are still running.";
+        Write-log -NoNewline "`r$curTime - $activeJobs update jobs are still running."; -Level INFO
     } else {
-        Write-Host -NoNewline "`r$curTime - $activeJobs update job is still running."
+        Write-log -NoNewline "`r$curTime - $activeJobs update job is still running." -Level INFO
     }
     Start-Sleep 10
     $activeJobs = Get-ActiveJobs
 }
-Write-Host ''
-Write-Host 'All update jobs are complete.'
+Write-log "`n" -Level INFO
+Write-log 'All update jobs are complete.' -Level INFO
 
