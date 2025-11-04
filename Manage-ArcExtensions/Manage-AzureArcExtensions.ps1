@@ -61,7 +61,13 @@
    .LINK
       https://github.com/sbrondel/scripts/Manage-AzureArcExtensions
 #>
-
+<#
+#Requires -Version <N>[.<n>]
+#Requires -Modules { <Module-Name> | <Hashtable> }
+#Requires -PSEdition <PSEdition-Name>
+#Requires -RunAsAdministrator
+#>
+#requires -Modules Az.ConnectedMachine
 
 [CmdletBinding()]
 param (
@@ -104,7 +110,7 @@ function Update-LookupTable {
         $lookupTable[$fullName] = $extension.version
     }
 
-    $lookupTable | Format-Table -AutoSize | Out-File -FilePath .\lookupTable.txt
+    $lookupTable | Sort-Object name | Format-Table -AutoSize | Out-File -FilePath .\lookupTable.txt
 }
 
 function Get-ArcMachineExtensions {
@@ -120,9 +126,9 @@ function Get-ArcMachineExtensions {
     foreach ($extension in $extensions) {
         # using InstanceViewType to get the correct name, as "Name" can sometimes differ from the Type in the portal.
         # Example:  Name of MicrosoftDefenderForSQL but Type/InstanceViewType is AdvancedThreatProtection.Windows
-        $extName = $extension.publisher + '.' + $extension.InstanceViewType
+        $extname = $extension.publisher + '.' + $extension.name
 
-        if ($extension.TypeHandlerVersion -ne $lookupTable.$extName) {
+        if ($extension.version -ne $lookupTable.$extName) {
             if ($Update) {
                 Write-Host 'Updating the extension.' -ForegroundColor Yellow
                 Update-Extension -resourcegroup $ResourceGroup -machine $machine -extension $extName -oldVersion $extension.TypeHandlerVersion -newVersion $lookupTable.$extName
@@ -130,20 +136,19 @@ function Get-ArcMachineExtensions {
                 Write-Host $machine 'needs to update' $extname 'from' $extension.TypeHandlerVersion 'to' $lookupTable.$extName
             }
         } else {
-            write-versbose $machine $extName 'is up to date.'
+            Write-Host $machine $extName 'is up to date.'
         }
     }
 
     Write-Host ''
 }
 
-
 function Get-ActiveJobs {
     return (Get-Job | Where-Object { ($_.State -eq 'Running') -and ($_.Name -eq 'Update-AzConnectedExtension_UpgradeExpanded') }).count
 }
 
 ################# Main Script Start ##########################
-
+<#
 if ($PSBoundParameters.Count -eq 0) {
     Write-Host 'No parameters were specified, operating in -CheckOnly reporting mode.'
     Write-Host 'Use the -Update parameter to update Azure Arc extensions.'
@@ -159,25 +164,27 @@ if ($PSBoundParameters.Count -eq 0) {
     Write-Host 'Unknown parameter entered, exiting...'
     exit
 }
+#>
 
-
-if($update){
+if ($update) {
     Write-Host 'Running in -Update mode.' -ForegroundColor Yellow
     Write-Host 'All out-of-date extensions will be updated, including those with Auto-Update enabled.'-ForegroundColor Yellow
     Write-Host ''
 
-}else{
+} else {
     Write-Host 'Running in -CheckOnly reporting mode...' -ForegroundColor Green
     Write-Host 'Use the -Update parameter to update Azure Arc extensions.' -ForegroundColor Yellow
     Write-Host ''
 }
 
+
+<#
 # Create our lookup table for extension and version
 $lookupTable = @{}
 
 # Populate the table
 Update-LookupTable
-
+#>
 # Get Azure Arc machines in resource group
 $machines = Get-AzConnectedMachine -ResourceGroupName $resourceGroup | Where-Object { $_.ProvisioningState -eq 'Succeeded' -and $_.Status -eq 'Connected' }
 $machineCount = $machines.count
