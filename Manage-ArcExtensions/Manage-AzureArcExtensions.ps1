@@ -177,22 +177,13 @@ function Update-Extension {
         $newVersion
     )
     $target = @{$extension = @{'targetVersion' = $version } }
-    Write-log 'Starting job to update' $extension 'on' $machine 'from' $oldVersion 'to' $newVersion
+    Write-log "Starting job to update $extension on $machine from $oldVersion to $newVersion" -Level INFO
     Update-AzConnectedExtension -ResourceGroupName $ResourceGroup -MachineName $machine -ExtensionTarget $target -AsJob | Out-Null
     Start-Sleep -Seconds 5  # added delay to help ensure many out-of-date extensions can patch in a single run
 }
 
-<#
-PS C:\> $extensions = get-azconnectedmachineextension -ResourceGroupName ArcRG -MachineName ET ; foreach ($extension in $extensions) {$extName = $extension.publisher+"."+$extension.Name; $extPair = $extName+","+$extension.TypeHandlerVersion; Write-log $extPair}
-Microsoft.Azure.Security.Monitoring.AzureSecurityWindowsAgent,1.8.0.76
-Qualys.WindowsAgent.AzureSecurityCenter,1.0.0.20
-Microsoft.CPlat.Core.WindowsPatchExtension,1.5.68
-Microsoft.Azure.Monitor.AzureMonitorWindowsAgent,1.26.0.0
-Microsoft.Azure.AzureDefenderForServers.MDE.Windows,1.0.9.5
-Microsoft.SoftwareUpdateManagement.WindowsOsUpdateExtension,1.0.20.0 #>
-
 function Update-LookupTable {
-    Write-log 'Getting list of latest extensions, this will take a minute or two...' -Level INFO
+    Write-log 'Getting list of latest extensions, this will take a minute or two.' -Level INFO
     $currentVersions = az vm extension image list --latest
     $currentVersions = $currentVersions | ConvertFrom-Json
     foreach ($extension in $currentVersions) {
@@ -200,7 +191,8 @@ function Update-LookupTable {
         $lookupTable[$fullName] = $extension.version
     }
 
-    $lookupTable | Sort-Object name | Format-Table -AutoSize | Out-File -FilePath .\lookupTable.txt
+    #$lookupTable | Sort-Object name | Format-Table -AutoSize | Out-File -FilePath .\lookupTable.txt
+    $lookupTable.GetEnumerator() | Sort-Object Name | Format-Table -AutoSize | Out-File -FilePath .\lookupTable.txt
 }
 
 function Get-ArcMachineExtensions {
@@ -223,14 +215,14 @@ function Get-ArcMachineExtensions {
                 Write-Log 'Updating the extension.' -Level WARNING
                 Update-Extension -resourcegroup $ResourceGroup -machine $machine -extension $extName -oldVersion $extension.TypeHandlerVersion -newVersion $lookupTable.$extName
             } else {
-                Write-log $machine 'needs to update' $extname 'from' $extension.TypeHandlerVersion 'to' $lookupTable.$extName -Level Info
+                Write-log "$machine needs to update $extname from $($extension.TypeHandlerVersion) to $($lookupTable.$extName)" -Level Info
             }
         } else {
-            Write-log $machine $extName 'is up to date.' -Level INFO
+            Write-log "$machine $extName is up to date." -Level INFO
         }
     }
 
-    Write-log ''
+    Write-log "`n" -Level INFO
 }
 
 function Get-ActiveJobs {
@@ -249,35 +241,19 @@ $LogName = ($ScriptName).Replace('.ps1', '') + '-' + $LogDate + '.log'
 $LogFile = $logPath + '\' + "$LogName"
 
 #endregion Variables
-<#
-if ($PSBoundParameters.Count -eq 0) {
-    Write-log 'No parameters were specified, operating in -CheckOnly reporting mode.' -Level INFO
-    Write-log 'Use the -Update parameter to update Azure Arc extensions.'-Level INFO
-    Write-log "`n" -Level INFO
-} elseif ($PSCmdlet.ParameterSetName -eq 'CheckOnly') {
-    Write-log 'Running in -CheckOnly reporting mode...'-Level INFO
-    Write-log "`n" -Level INFO
-} elseif ($PSCmdlet.ParameterSetName -eq 'Update') {
-    Write-log 'Running in -Update mode.'-Level INFO
-    Write-log 'All out-of-date extensions will be updated, including those with Auto-Update enabled.'-Level INFO
-    Write-log "`n" -Level INFO
-} else {
-    Write-log 'Unknown parameter entered, exiting...'-Level INFO
-    exit
-}
-#>
+Write-log 'Starting job to check / update Azure / Arc extensions.' -Level INFO
+Write-log "`n" -Level INFO
 
 if ($update) {
     Write-log 'Running in -Update mode.' -Level Warning
     Write-log 'All out-of-date extensions will be updated, including those with Auto-Update enabled.' -Level Warning
-    Write-log '' -Level Warning
+    Write-log "`n" -Level Warning
 
 } else {
-    Write-log 'Running in -CheckOnly reporting mode...' -Level INFO
+    Write-log 'Running in -CheckOnly reporting mode.' -Level INFO
     Write-log 'Use the -Update parameter to update Azure Arc extensions.' -Level Warning
     Write-log "`n" -Level INFO
 }
-
 
 
 # Create our lookup table for extension and version
@@ -291,7 +267,7 @@ $machines = Get-AzConnectedMachine -ResourceGroupName $resourceGroup | Where-Obj
 $machineCount = $machines.count
 
 # Begin main loop, with progress bar
-Write-log 'Discovered' $machineCount "Azure Arc systems in Resource Group $resourceGroup" -Level INFO
+Write-log "Discovered $machineCount Azure Arc systems in Resource Group $resourceGroup" -Level INFO
 Write-log "`n" -Level INFO
 $currentMachine = 1
 
@@ -314,13 +290,15 @@ $activeJobs = Get-ActiveJobs
 while ($activeJobs -gt 0) {
     $curTime = (Get-Date -Format 'hh:mm:ss tt')
     if ($activeJobs -gt 1) {
-        Write-log -NoNewline "`r$curTime - $activeJobs update jobs are still running."; -Level INFO
+        Write-log "$activeJobs update jobs are still running." -Level INFO
     } else {
-        Write-log -NoNewline "`r$curTime - $activeJobs update job is still running." -Level INFO
+        Write-log "$activeJobs update job is still running." -Level INFO
     }
     Start-Sleep 10
     $activeJobs = Get-ActiveJobs
 }
-Write-log "`n" -Level INFO
+Write-log '-----------------------------' -Level INFO
 Write-log 'All update jobs are complete.' -Level INFO
+Write-log 'Ending job' -Level INFO
+
 
